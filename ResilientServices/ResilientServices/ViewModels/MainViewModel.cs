@@ -1,47 +1,71 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+
+using Akavache;
+
+using Cirrious.MvvmCross.ViewModels;
+
 using Fusillade;
+
 using PropertyChanged;
+
 using ResilientServices.Services;
+
 using TekConf.Mobile.Core.Dtos;
 
 namespace ResilientServices.ViewModels
 {
-	[ImplementPropertyChanged]
-	public class MainViewModel
-	{
-		private readonly IConferencesService _conferencesService;
+    [ImplementPropertyChanged]
+    public class MainViewModel : MvxViewModel
+    {
+        private readonly IConferencesService conferencesService;
 
-		public MainViewModel(IConferencesService conferencesService)
-		{
-			_conferencesService = conferencesService;
-		}
+        public MainViewModel(IConferencesService conferencesService)
+        {
+            this.conferencesService = conferencesService;
+        }
 
-		public List<ConferenceDto> Conferences { get; set; }
+        public List<ConferenceDto> Conferences { get; set; }
+        
         public bool IsLoading { get; set; }
 
-	    public async Task GetConferences()
-	    {
-	        this.IsLoading = true;
+        public MvxCommand RefreshCommand
+        {
+            get { return new MvxCommand(() =>
+            {
+                BlobCache.LocalMachine.Invalidate("conferences");
+                GetConferences();
+            }); }
+        }
 
-	        var conferences = await _conferencesService
-                                            .GetConferences(Priority.Background)
-                                            .ConfigureAwait(false);
+        public override async void Start()
+        {
+            base.Start();
 
-	        CacheConferences(conferences);
+            await GetConferences();
+        }
 
-            this.IsLoading = false;
+        private async Task GetConferences()
+        {
+            IsLoading = true;
 
-	        this.Conferences = conferences;
-	    }
+            var conferences = await conferencesService
+                .GetConferences(Priority.UserInitiated);
 
-	    private void CacheConferences(List<ConferenceDto> conferences)
-	    {
-	        foreach (var slug in conferences.Select(x => x.Slug))
-	        {
-	            _conferencesService.GetConference(Priority.Speculative, slug);
-	        }
-	    }
-	}
+            CacheConferences(conferences);
+
+            Conferences = conferences;
+
+            IsLoading = false;
+        }
+
+        private void CacheConferences(List<ConferenceDto> conferences)
+        {
+            foreach (var slug in conferences.Where(c => c.Name != "Example").Select(x => x.Slug))
+            {
+                conferencesService.GetConference(Priority.Speculative, slug);
+            }
+        }
+    }
 }

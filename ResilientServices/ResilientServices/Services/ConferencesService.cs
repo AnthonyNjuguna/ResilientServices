@@ -3,10 +3,15 @@ using System.Collections.Generic;
 using System.Net;
 using System.Reactive.Linq;
 using System.Threading.Tasks;
+
 using Akavache;
+
 using Connectivity.Plugin;
+
 using Fusillade;
+
 using Polly;
+
 using TekConf.Mobile.Core.Dtos;
 
 namespace ResilientServices.Services
@@ -14,25 +19,21 @@ namespace ResilientServices.Services
     
     public class ConferencesService : IConferencesService
     {
-        private readonly IApiService _apiService;
+        private readonly IApiService apiService;
 
         public ConferencesService(IApiService apiService)
         {
-            _apiService = apiService;
+            this.apiService = apiService;
         }
 
         public async Task<List<ConferenceDto>> GetConferences(Priority priority)
         {
             var cache = BlobCache.LocalMachine;
-            var cachedConferences = cache.GetAndFetchLatest("conferences", () => GetRemoteConferencesAsync(priority),
-                offset =>
-                {
-                    TimeSpan elapsed = DateTimeOffset.Now - offset;
-                    return elapsed > new TimeSpan(hours: 24, minutes: 0, seconds: 0);
-                });
+            var cachedConferences = cache.GetAndFetchLatest("conferences", () => GetRemoteConferencesAsync(priority));
 
             var conferences = await cachedConferences.FirstOrDefaultAsync();
-            return conferences;
+
+            return conferences ?? new List<ConferenceDto> { new ConferenceDto { Name = "Example" } };
         }
 
         public async Task<ConferenceDto> GetConference(Priority priority, string slug)
@@ -56,34 +57,36 @@ namespace ResilientServices.Services
             switch (priority)
             {
                 case Priority.Background:
-                    getConferencesTask = _apiService.Background.GetConferences();
+                    getConferencesTask = apiService.Background.GetConferences();
                     break;
                 case Priority.UserInitiated:
-                    getConferencesTask = _apiService.UserInitiated.GetConferences();
+                    getConferencesTask = apiService.UserInitiated.GetConferences();
                     break;
                 case Priority.Speculative:
-                    getConferencesTask = _apiService.Speculative.GetConferences();
+                    getConferencesTask = apiService.Speculative.GetConferences();
                     break;
                 default:
-                    getConferencesTask = _apiService.UserInitiated.GetConferences();
+                    getConferencesTask = apiService.UserInitiated.GetConferences();
                     break;
             }
             
-            if (CrossConnectivity.Current.IsConnected)
+            //TODO: why does the emulator thinks it not connected (browser works)
+            //if (CrossConnectivity.Current.IsConnected)
             {
                 conferences = await Policy
-                      .Handle<WebException>()
-                      .WaitAndRetry
-                      (
-                        retryCount:5, 
-                        sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))
-                      )
-                      .ExecuteAsync(async () => await getConferencesTask);
+                    .Handle<WebException>()
+                    .WaitAndRetryAsync
+                    (
+                        retryCount: 5,
+                        sleepDurationProvider: retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
+                        onRetry: (ex, timespan) => { }
+                    )
+                    .ExecuteAsync(async () => await getConferencesTask);
             }
             return conferences;
         }
 
-        public async Task<ConferenceDto> GetRemoteConference(Priority priority, string slug)
+        private async Task<ConferenceDto> GetRemoteConference(Priority priority, string slug)
         {
             ConferenceDto conference = null;
 
@@ -91,20 +94,21 @@ namespace ResilientServices.Services
             switch (priority)
             {
                 case Priority.Background:
-                    getConferenceTask = _apiService.Background.GetConference(slug);
+                    getConferenceTask = apiService.Background.GetConference(slug);
                     break;
                 case Priority.UserInitiated:
-                    getConferenceTask = _apiService.UserInitiated.GetConference(slug);
+                    getConferenceTask = apiService.UserInitiated.GetConference(slug);
                     break;
                 case Priority.Speculative:
-                    getConferenceTask = _apiService.Speculative.GetConference(slug);
+                    getConferenceTask = apiService.Speculative.GetConference(slug);
                     break;
                 default:
-                    getConferenceTask = _apiService.UserInitiated.GetConference(slug);
+                    getConferenceTask = apiService.UserInitiated.GetConference(slug);
                     break;
             }
 
-            if (CrossConnectivity.Current.IsConnected)
+            //TODO: why does the emulator thinks it not connected (browser works)
+            //if (CrossConnectivity.Current.IsConnected)
             {
                 conference = await Policy
                     .Handle<Exception>()
@@ -114,6 +118,5 @@ namespace ResilientServices.Services
 
             return conference;
         }
-
     }
 }
